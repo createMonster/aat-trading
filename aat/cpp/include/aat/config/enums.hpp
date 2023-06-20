@@ -29,6 +29,23 @@ namespace config {
         PUT = 1,
     };
 
-    
+
+    ENUM_TO_STRING(TradingType)
+    ENUM_TO_STRING(Side)
+    ENUM_TO_STRING(OptionType)
+    ENUM_TO_STRING(EventType)
+    ENUM_TO_STRING(DataType)
+    ENUM_TO_STRING(InstrumentType)
+    ENUM_TO_STRING(OrderType)
+    ENUM_TO_STRING(OrderFlag)
+
+    ENUM_FROM_STRING(Side)
+    ENUM_FROM_STRING(EventType)
+    ENUM_FROM_STRING(DataType)
+    ENUM_FROM_STRING(InstrumentType)
+    ENUM_FROM_STRING(OrderType)
+    ENUM_FROM_STRING(OrderFlag)
+    ENUM_FROM_STRING(ExitRoutine)
+
 } // namespace config
 } // namespace aat
