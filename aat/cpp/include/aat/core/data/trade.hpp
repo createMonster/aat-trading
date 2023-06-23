@@ -49,7 +49,7 @@ namespace core {
         double price;
 
         std::deque<std::shared_ptr<Order>> maker_orders;
-        std::shared_ptr<Order> taker_orders;
+        std::shared_ptr<Order> taker_order;
         std::shared_ptr<Order> my_order;
 
         double _slippage;
