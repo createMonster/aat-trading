@@ -31,6 +31,35 @@ namespace core {
         , exchange(NullExchange)
         , callback(nullptr) {}
 
+    OrderBook::OrderBook(const Instrument &instrument, const ExchangeType &exchange)
+        : instrument(instrument)
+        , exchange(exchange)
+        , callback(nullptr) {}
+
+    OrderBook::OrderBook(
+        const Instrument& instrument, const ExchangeType& exchange, std::function<void(std::shared_ptr<Event>)> callback)
+        : instrument(instrument)
+        , exchange(exchange)
+        , callback(callback) {}
+
+    void 
+    OrderBook::setCallback(std::function<void(std::shared_ptr<Event>)> callback){
+        collector.setCallback(callback);
+    }
+
+    void 
+    OrderBook::reset() {
+        buy_levels = std::vector<double>();
+        sell_levels = std::vector<double>();
+        buys = std::unordered_map<double, std::shared_ptr<PriceLevel>>();
+        sells = std::unordered_map<double, std::shared_ptr<PriceLevel>>();
+        collector = Collector(callback);
+    }
+
+    void 
+    OrderBook::add(std::shared_ptr<Order> order) {
+        
+    }
     
 } // namespace core
 } // namespace aat

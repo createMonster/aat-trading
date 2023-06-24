@@ -69,7 +69,40 @@ namespace core {
             void cancel(std::shared_ptr<Order> order);
             void change(std::shared_ptr<Order> order);
 
+            std::shared_ptr<Order> find(std::shared_ptr<Order> order);
+
+            std::vector<double> topOfBook() const;
+            std::map<Side, std::vector<double>> topOfBookMap() const;
+            double spread() const;
             
+            std::vector<double> level(uint_t level) const;
+            std::vector<std::shared_ptr<PriceLevel>> level(double price) const;
+            std::vector<std::vector<double>> levels(uint_t levels) const;
+            std::map<Side, std::vector<std::vector<double>>> levelsMap(uint_t levels) const;
+
+            str_t toString() const;
+            
+            // iterator
+            friend class OrderBookIterator;
+            using iterator = OrderBookIterator;
+            iterator begin() const;
+            iterator end() const;
+
+        private:
+            void clearOrder(std::shared_ptr<Order> order, uint_t amount);
+            double getTop(Side side, uint_t cleared);
+            bool insort(std::vector<double> &levels, double value);
+
+            Collector collector;
+            const Instrument& instrument;
+            const ExchangeType& exchange;
+            std::function<void(std::shared_ptr<Event>)> callback;
+
+            std::vector<double> buy_levels;
+            std::vector<double> sell_levels;
+
+            std::unordered_map<double, std::shared_ptr<PriceLevel>> buys;
+            std::unordered_map<double, std::shared_ptr<PriceLevel>> sells;
             
     };
 } // namespace core
