@@ -12,7 +12,7 @@ namespace core {
 
     std::shared_ptr<Order>
     OrderBookIterator::operator*() {
-        if (side = Side::SELL) {
+        if (side == Side::SELL) {
             return (*(order_book.sells.at(price_level)))[index_in_level];
         }
         else {
@@ -110,6 +110,12 @@ namespace core {
         
         
     }
+
+
+
+
+
+    
 
     double
     OrderBook::getTop(Side side, uint_t cleared) {
