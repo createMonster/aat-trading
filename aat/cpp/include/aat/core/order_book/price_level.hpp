@@ -27,7 +27,7 @@ namespace core {
             std::shared_ptr<Order> remove(std::shared_ptr<Order> order);
             std::shared_ptr<Order> modify(std::shared_ptr<Order> order);
             std::shared_ptr<Order> cross(
-                std::shared_ptr<Order> taker_order, std::vector<srtd::shared_ptr<Order>> &secondaries);
+                std::shared_ptr<Order> taker_order, std::vector<std::shared_ptr<Order>>& secondaries);
 
             void clear();
             void commit();
