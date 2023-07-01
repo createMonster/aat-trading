@@ -107,8 +107,162 @@ namespace core {
         }
 
         // if order remaining, check rules / push to book
+        if (order->filled < order->volume) {
+            if (order->order_type == OrderType::MARKET) {
+                // market orders
+                if (order->flag == OrderFlag::ALL_OR_NONE || order->flag == OrderFlag::FILL_OR_KILL) {
+                    // cancel the order, do not execute any
+                    collector.revert();
+                    
+                    // cancel the order
+                    collector.pushCancel(order);
+                    collector.commit();
+                } else {
+                    // market order, partial
+                    if (order->filled > 0)
+                        collector.pushTrade(order, order->filled);
+                    
+                    // clear levels
+                    clearOrders(order, collector.getClearedLevels());
+                    
+                    // execute order
+                    collector.pushCancel(order);
+                    collector.commit();
+                    
+                    // execute secondaries
+                    for (std::shared_ptr<Order> secondary : secondaries) {
+                        secondary->timestamp = order->timestamp;
+                        add(secondary);
+                    }
+                }
+            } else {
+                // limit orders
+                if (order->flag == OrderFlag::FILL_OR_KILL) {
+                    if (order->filled > 0) {
+                        // reverse partial, canncel the order, do not execute any
+                        collector.revert();
+                        //cancel the order
+                        collector.pushCancel(order);
+                        collector.commit();
+                    } else {
+                        // add to book
+                        collector.commit();
+
+                        // limit order, put on books
+                        if (insort(levels, order->price)) {
+                            // new price level
+                            prices[order->price] = std::make_shared<PriceLevel>(order->price, collector);
+                        }
+                        
+                        // add order to price level
+                        prices[order->price]->add(order);
+
+                        // execute secondaries
+                        for (std::shared_ptr<Order> secondary : secondaries) {
+                            secondary->timestamp = order->timestamp;
+                            add(secondary);
+                        }
+                    }
+                } else if (order->flag == OrderFlag::ALL_OR_NONE) {
+                    if (order->filled > 0) {
+                        // order could not fill fully, revert
+                        // cancel the order, do not execute any
+                        collector.revert();
+                        collector.pushCancel(order);
+                        collector.commit();
+                    } else {
+                        // add to book
+                        collector.commit();
+
+                        // limit order, put on books
+                        if (insort(levels, order->price)) {
+                            // new price level
+                            prices[order->price] = std::make_shared<PriceLevel>(order->price, collector);
+                        }
+                        
+                        // add order to price level
+                        prices[order->price]->add(order);
+
+                        // execute secondaries
+                        for (std::shared_ptr<Order> secondary : secondaries) {
+                            secondary->timestamp = order->timestamp;
+                            add(secondary);
+                        }
+                    }
+                } else if (order->flag == OrderFlag::IMMEDIATE_OR_CANCEL) {
+                    if (order->filled > 0) {
+                        // clear levels
+                        clearOrders(order, collector.getClearedLevels());
+
+                        // execute the ones that filled, kill the remainder
+                        collector.pushCancel(order);
+                        collector.commit();
+
+                        // execute secondaries
+                        for (std::shared_ptr<Order> secondary : secondaries) {
+                        secondary->timestamp = order->timestamp;  // adjust trigger time
+                        add(secondary);
+                        }
+
+                    } else {
+                        // add to book
+                        collector.commit();
+
+                        // limit order, put on books
+                        if (insort(levels, order->price)) {
+                        // new price level
+                        prices[order->price] = std::make_shared<PriceLevel>(order->price, collector);
+                        }
+                        // add order to price level
+                        prices[order->price]->add(order);
+
+                        // execute secondaries
+                        for (std::shared_ptr<Order> secondary : secondaries) {
+                        secondary->timestamp = order->timestamp;  // adjust trigger time
+                        add(secondary);
+                        }
+                    }
+                } else {
+                    // clear levels
+                    clearOrders(order, collector.getClearedLevels());
+
+                    // execute order
+                    collector.commit();
+
+                    // limit order, put on books
+                    if (insort(levels, order->price)) {
+                        // new price level
+                        prices[order->price] = std::make_shared<PriceLevel>(order->price, collector);
+                    }
+
+                    // add order to price level
+                    prices[order->price]->add(order);
+
+                    // execute secondaries
+                    for (std::shared_ptr<Order> secondary : secondaries) {
+                        secondary->timestamp = order->timestamp;  // adjust trigger time
+                        add(secondary);
+                    }
+                }
+            }
+        } else {
+            // don't need to add trade as this is done in the price_levels
+            
+            // clear levels
+            clearOrders(order, collector.getClearedLevels());
+            
+            // execute all orders
+            collector.commit();
+
+            // execute secondaries
+            for (std::shared_ptr<Order> secondary : secondaries) {
+                secondary->timestamp = order->timestamp;
+                add(secondary);
+            }
+        }
         
-        
+        // clear the collector
+        collector.clear();
     }
 
 
