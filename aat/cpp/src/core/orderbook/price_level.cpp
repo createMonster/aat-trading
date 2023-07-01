@@ -207,9 +207,46 @@ namespace core {
         }
         return taker_order;
     }
+
+    void 
+    PriceLevel::clear() {
+        orders.clear();
+        orders_staged.clear();
+        orders_filled_staged.clear();
+        stop_orders.clear();
+        stop_orders_staged.clear();
+    }
     
-    
-    
-    
+    void 
+    PriceLevel::commit() {
+        clear();
+    }
+
+    void 
+    PriceLevel::revert() {
+        // reset orders
+        orders.clear();
+        orders.insert(
+            orders.begin(), std::make_move_iterator(orders_staged.begin()), std::make_move_iterator(orders_staged.end()));
+        
+        // deduct filled amount
+        for (std::size_t i = 0; i < orders.size(); ++i)
+            orders[i]->filled -= orders_filled_staged[i];
+        
+        // reset staged
+        orders_staged.clear();
+        orders_filled_staged.clear();
+        
+        // reset stop orders
+        stop_orders.clear();
+        stop_orders.insert(
+            stop_orders.begin(), 
+            std::make_move_iterator(stop_orders_staged.begin()), 
+            std::make_move_iterator(stop_orders_staged.end()));
+
+        // reset staged
+        stop_orders_staged.clear();
+    }
+
 } // namespace core
 } // namespace aat
