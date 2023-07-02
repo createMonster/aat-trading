@@ -265,9 +265,99 @@ namespace core {
         collector.clear();
     }
 
+    void 
+    OrderBook::change(std::shared_ptr<Order> order) {
+        double price = order->price;
+        Side side = order->side;
+        std::vector<double> &levels = (side == Side::BUY) ? buy_levels : sell_levels;
+        std::unordered_map<double, std::shared_ptr<PriceLevel>> &prices = (side == Side::BUY) ? buys : sells;
 
+        if (std::find(levels.begin(), levels.end(), price) == levels.end()) {
+            throw AATCPPException("Orderbook out of sync");
+        }
 
+        // modify order in price level
+        prices[price]->modify(order);
+    }
 
+    void
+    OrderBook::cancel(std::shared_ptr<Order> order) {
+        double price = order->price;
+        Side side = order->side;
+        std::vector<double> &levels = (side == Side::BUY) ? buy_levels : sell_levels;
+        std::unordered_map<double, std::shared_ptr<PriceLevel>> &prices = (side == Side::BUY) ? buys : sells;
+
+        if (std::find(levels.begin(), levels.end(), price) == levels.end()) {
+            throw AATCPPException("Orderbook out of sync");
+        }
+        
+        // remove order from price level
+        prices[price]->remove(order);
+        
+        // delete level if no more volume
+        if (prices[price].size() == 0) {
+            levels.erase(std::remove(levels.begin(), levels.end(), price), levels.end());
+        }
+    }
+
+    std::shared_ptr<Order> 
+    OrderBook::find(std::shared_ptr<Order> order) {
+        double price = order->price;
+        Side side = order->side;
+        std::vector<double> &levels = (side == Side::BUY) ? buy_levels : sell_levels;
+        std::unordered_map<double, std::shared_ptr<PriceLevel>> &prices = (side == Side::BUY) ? buys : sells;
+
+        if (std::find(levels.begin(), levels.end(), price) == levels.end()) {
+            return nullptr;
+        }
+        
+        // find in a price level
+        return levels[price]->find(order);
+    }
+
+    std::map<Side, std::vector<double>> 
+    OrderBook::topOfBookMap() const {
+        std::vector<double> tob = topOfBook();
+        std::map<Side, std::vector<double>> ret;
+        ret[Side::BUY] == std::vector<double>();
+        ret[Side::SELL] == std::vector<double>();
+        ret[Side::BUY].push_back(tob[0]);
+        ret[Side::BUY].push_back(tob[1]);
+        ret[Side::SELL].push_back(tob[2]);
+        ret[Side::SELL].push_back(tob[3]);
+        
+        return ret;
+    }
+
+    std::vector<double>
+    OrderBook::topOfBook() const {
+        std::vector<double> ret;
+        if (buy_levels.size() > 0) {
+            ret.push_back(buy_levels.back());
+            ret.push_back(buys.at(buy_levels.back())->getVolume());
+        } else {
+            ret.push_back(0.0);
+            ret.push_back(0.0);
+        }
+
+        if (sell_levels.size() > 0) {
+            ret.push_back(sell_levels.front());
+            ret.push_back(sells.at(sell_levels.front())->getVolume());
+        } else {
+            ret.push_back(std::numeric_limits<double>::infinity());
+            ret.push_back(0.0);
+        }
+
+        return ret;
+    }
+
+    double 
+    OrderBook::spread() const {
+        std::vector<double> tob = topOfBook();
+        return tob[3] - tob[1];
+    }
+
+    
 
     
 

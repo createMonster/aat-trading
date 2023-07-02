@@ -69,8 +69,8 @@ namespace core {
         // remove order
         orders.erase(std::find(orders.begin(), orders.end(), order));
         
-        // trigger change event
-        collector.pushChange(order);
+        // trigger event
+        collector.pushCancel(order);
         
         return order;
     }
