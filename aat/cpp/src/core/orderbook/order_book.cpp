@@ -357,9 +357,98 @@ namespace core {
         return tob[3] - tob[1];
     }
 
-    
+    std::vector<double>
+    OrderBook::level(std::uint64_t level) const {
+        std::vector<double> ret;
+        
+        // collect bids and asks at `level`
+        if (buy_levels.size() > level) {
+            ret.push_back(buy_levels[buy_levels.size() - level - 1]);
+            ret.push_back(buys.at(buy_levels[buy_levels.size() - level - 1])->getVolume());
+        } else {
+            ret.push_back(0.0);
+            ret.push_back(0.0);
+        }
+        
+        if (sell_levels.size() > level) {
+            ret.push_back(sell_levels[level]);
+            ret.push_back(sells.at(sell_levels[level])->getVolume());
+        } else {
+            ret.push_back(std::numeric_limits<double>::infinity());
+            ret.push_back(0.0);
+        }
+        return ret;
+    }
 
-    
+    std::vector<std::shared_ptr<PriceLevel>> 
+    OrderBook::level(double price) const {
+        
+        std::vector<std::shared_ptr<PriceLevel>> ret;
+        
+        if (std::find(buy_levels.begin(), buy_levels.end(), price) == buy_levels.end()) {
+            ret.push_back(buys.at(price));
+        } else {
+            ret.push_back(nullptr);
+        }
+
+        if (std::find(sell_levels.begin(), sell_levels.end, price) == sell_levels.end()) {
+            ret.push_back(sells.at(price));
+        } else {
+            ret.push_back(nullptr);
+        }
+
+        return ret;
+    }
+
+    std::map<Side, std::vector<std::vector<double>>>
+    OrderBook::levelsMap(std::uint64_t levels) const {
+        std::map<Side, std::vector<std::vector<double>>> ret;
+
+        ret[Side::BUY] == std::vector<std::vector<double>>();
+        ret[Side::SELL] == std::vector<std::vector<double>>();
+
+        for (std::uint64_t i = 0; i < levels; ++i) {
+            auto _level = level((std::uint64_t)i);
+
+            // bid
+            ret[Side::BUY].push_back(std::vector<double>());
+            // ask
+            ret[Side::SELL].push_back(std::vector<double>());
+
+            ret[Side::BUY][i].push_back(_level[0]);
+            ret[Side::BUY][i].push_back(_level[1]);
+            ret[Side::SELL][i].push_back(_level[2]);
+            ret[Side::SELL][i].push_back(_level[3]);
+        }
+        return ret;
+    }
+
+    std::vector<std::vector<double>> 
+    OrderBook::levels(std::uint64_t levels) const {
+        std::vector<std::vector<double>> ret;
+        // bid
+        ret.push_back(std::vector<double>());
+        // ask
+        ret.push_back(std::vector<double>());
+
+        for (std::uint64_t i = 0; i < levels; ++i) {
+        auto _level = level((std::uint64_t)i);
+        ret[0].push_back(_level[0]);
+        ret[0].push_back(_level[1]);
+        ret[1].push_back(_level[2]);
+        ret[1].push_back(_level[3]);
+        }
+        return ret;
+    }
+
+    void 
+    OrderBook::clearOrders(std::shared_ptr<Order> order, std::uint64_t amount) {
+        if (order->side == Side::BUY) {
+            sell_levels.erase(sell_levels.begin(), sell_levels.begin() + amount);
+        } else {
+            buy_levels.erase(buy_levels.begin() + (buy_levels.size() - amount), buy_levels.end());
+        }
+    }
 
     double
     OrderBook::getTop(Side side, uint_t cleared) {
@@ -379,6 +468,11 @@ namespace core {
                 return -1;
             }
         }
+    }
+    
+    bool 
+    OrderBook::insort() {
+        
     }
     
 } // namespace core
