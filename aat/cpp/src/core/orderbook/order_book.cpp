@@ -471,8 +471,31 @@ namespace core {
     }
     
     bool 
-    OrderBook::insort() {
+    OrderBook::insort(std::vector<double>& levels, double value) {
+        auto orig_length = levels.size();
+        levels.insert(std::upper_bound(levels.begin(), levels.end(), value), value);
+        return orig_length != levels.size();
+    }
+
+    str_t
+    OrderBook::toString() const {
+        sstream_t ss;
         
+        // show top 5 levels, then group next 5, 10, 20, etc
+        // sells first
+        std::vector<std::shared_ptr<PriceLevel>> sells_to_print;
+
+        for (std::uint64_t i = 0; i < sell_levels.size(); ++i) {
+            if (i < 5) {
+                // append to list
+                sells_to_print.push_back(sells.at(sell_levels[i]));
+            } else {
+                // TODO implement the rest
+                break;
+            }
+        }
+
+        // reverse so visually upside down
     }
     
 } // namespace core
