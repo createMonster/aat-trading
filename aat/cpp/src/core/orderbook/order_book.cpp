@@ -496,6 +496,48 @@ namespace core {
         }
 
         // reverse so visually upside down
+        std::reverse(sells_to_print.begin(), sells_to_print.end());
+        
+        // show top 5 levels, then group next 5, 10, 20, etc
+        std::vector<std::shared_ptr<PriceLevel>> buys_to_print;
+
+        int i = 0;
+
+        for (auto iter = buy_levels.end() - 1; iter > buy_levels.begin(); --iter) {
+            if ((i++) < 5) {
+                // append to list
+                buys_to_print.push_back(buys.at(*iter));
+            } else {
+                // TODO implement the rest from python
+                break;
+            }
+        }
+
+        // sell list, then line, then buy list
+        
+        // format the sells on top, tabbed to the right, with price volume
+        for (std::shared_ptr<PriceLevel> price_level: sells_to_print) {
+            ss << "\t\t" << price_level->getPrice() << "\t\t" << price_level->getVolume() << std::endl;
+        }
+        
+        ss << "-----------------------------------------------------\n";
+        
+        // format the buys on bottom
+        for (std::shared_ptr<PriceLevel> price_level: buys_to_print) {
+            ss << price_level->getPrice() << "\t\t" << price_level->getVolume() << std::endl;
+        }
+
+        return ss.str();
+    }
+    
+    OrderBookIterator
+    OrderBook::begin() const {
+        return OrderBookIterator(*this);
+    }
+
+    OrderBookIterator
+    OrderBook::end() const {
+        return OrderBookIterator(*this, std::numeric_limits<double>::infinity(), -1, Side::BUY);
     }
     
 } // namespace core
