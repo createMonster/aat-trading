@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Iterator, Tuple, Union
+from typing import Dict, Optional, Iterator, Tuple, Union, List
 
 from .price_level import PriceLevelRO
 from ..data import Order
@@ -48,7 +48,7 @@ class OrderBookBase(ABC):
         pass
 
     @abstractmethod
-    def ask(self, levels: int  0
+    def ask(self, levels: int = 0
             ) -> Union[PriceLevelRO, List[Optional[PriceLevelRO]]]:
         pass
 
