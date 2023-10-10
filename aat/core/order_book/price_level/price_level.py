@@ -85,5 +85,47 @@ class _PriceLevel(object):
 
         # trigger cancel event
         self._collector.pushChange(order)
-    
 
+    def remove(self, order: Order) -> Order:
+        pass
+
+    def cross(self, take_order: Order) -> Tuple[Optional[Order], List[Order]]:
+        """
+        Args:
+            take_order(Order): The order that cross the spreads
+        Returns:
+            order(Order or None): the order crossing, if there is some remaining
+            secondary orders (List[Order] or None): orders get triggered as a result of crossing (e.g. stop orders)
+        """
+        pass
+
+    def clear():
+        pass
+
+    def _get_stop_orders():
+        pass
+
+    def commit():
+        pass
+
+    def revert():
+        pass
+
+    def __bool__(self):
+        pass
+
+    def __iter__(self):
+        pass
+
+    def __len__(self):
+        pass
+
+    def __getitem__(self):
+        pass
+
+    def ro():
+        pass
+
+    def toDict():
+        pass
+    
