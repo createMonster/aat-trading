@@ -45,5 +45,151 @@ class _Collector(object):
 
         # reset status
         self.reset()
+
+    ####################
+    # State Management #
+    ####################
+
+    def reset(self) -> None:
+        self._event_queue.clear()
+        self._price = 0.0
+        self._volume = 0.0
+        self._price_levels.clear()
+        self._orders.clear()
+        self._taker_order = None
+
+    def setCallback(self, callback: Callable) -> None:
+        self._callback = callback
+
+    def push(self, event: Event) -> None:
+        """Push event to queue"""
+        self._event_queue.append(event)
+
+    def pushOpen(self, order: Order) -> None:
+        """Push order open"""
+        self.push(Event(type=EventType.OPEN, target=order))
+
+    def pushFill(
+            self, order: Order, accumulate: bool = False, filled_in_txn: float = 0.0
+        ) -> None:
+        """Push order fill"""
+        if accumulate:
+            self.accumulate(order, filled_in_txn)
+        self.push(Event(type=EventType.FILL, target=order))
+
+    def pushChange(
+            self, order: Order, accumulate: bool = False, filled_in_txn: float = 0.0
+        ) -> None:
+        """Push order change"""
+        if accumulate:
+            self.accumulate(order, filled_in_txn)
+        self.push(Event(type=EventType.CHANGE, target=order))
+
+    def pushCancel(
+            self, order: Order, accumulate: bool = False, filled_in_txn: float = 0.0
+        ) -> None:
+        """Push order cancellation"""
+        if accumulate:
+            self.accumulate(order, filled_in_txn)
+        self.push(Event(type=EventType.CANCEL, target=order))
+
+    def pushTrade(self, taker_order: Order, filled_in_txn: float = 0.0) -> None:
+        """Push taker order trade"""
+        if not self._orders:
+            raise Exception("No maker orders provided")
+        
+        if taker_order.filled <= 0:
+            raise Exception("No trade occured")
+        
+        if filled_in_txn != self.volume:
+            raise Exception("Accumulation error occured")
+        
+        self.push(
+            Event(
+                type=EventType.TRADE,
+                target=Trade(
+                    volume=self.volume,
+                    price=self.price,
+                    maker_orders=list(self.orders.copy()),
+                    taker_order=taker_order,
+                )
+            )
+        )
+
+        self._taker_order = taker_order
+
+    def accumulate(self, order: Order, filled_in_txn: float = 0.0) -> None:
+        assert filled_in_txn > 0
+
+        if self._volume + filled_in_txn > 0:
+            self._price = (self._volume * self._price + filled_in_txn * order.price) / (self._volume + filled_in_txn)
+
+        else:
+            self._price = 0.0
+
+        self._volume += filled_in_txn
+        self._orders.append(order)
+        
+
+    def clearLevel(self, price_level: "_PriceLevel") -> int:
+        self._price_levels.append(price_level)
+        return len(self._price_levels)
+
+    def commit(self) -> None:
+        """Flush the event queue"""
+        while self._event_queue:
+            ev = self._event_queue.popleft()
+            self._callback(ev)
+
+        for pl in self._price_levels:
+            pl.commit()
+
+        self.reset()
+            
+
+    def revert(self) -> None:
+        """revert the event queue"""
+        for pl in self._price_levels:
+            pl.revert()
+
+        self.reset()
+
+    def clear(self) -> None:
+        """clear the event queue"""
+        self.reset()
+
+    ####################
+
+    ###############
+    # Order Stats #
+    ###############
+    @property
+    def price(self) -> float:
+        """VWAP"""
+        return self._price
+
+    @property
+    def volume(self) -> float:
+        """volume"""
+        return self._volume
+
+    @property
+    def orders(self) -> Deque[Order]:
+        return self._orders
+
+    @property
+    def taker_order(self) -> Optional[Order]:
+        return self._taker_order
+
+    @property
+    def events(self) -> Deque[Event]:
+        return self._event_queue
+
+    @property
+    def price_levels(self) -> Deque["_PriceLevel"]:
+        return self._price_levels
+
+    def clearedLevels(self) -> int:
+        return len(self._price_levels)
     
     
