@@ -87,7 +87,18 @@ class _PriceLevel(object):
         self._collector.pushChange(order)
 
     def remove(self, order: Order) -> Order:
-        pass
+        # Check if order is in level
+        if order.price != self._price or order.id not in (o.id for o in self._orders):
+            # something is wrong
+            raise Exception(f"Order not found in price level {self._price}: {order}")
+        
+        # remove the order
+        self._orders.remove(order)
+        
+        # push cancel event
+        self._collector.pushCancel(order)
+
+        return order
 
     def cross(self, take_order: Order) -> Tuple[Optional[Order], List[Order]]:
         """
