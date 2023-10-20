@@ -181,11 +181,85 @@ class OrderBook(OrderBookBase):
         )
             
         
-    def bids():
+    def bids(
+        self, levels: int = 0
+    ) -> Union[PriceLevelRO, List[Optional[PriceLevelRO]]]:
+        """return bid levels starting at top
+
+        Args:
+            levels (int): number of levels to return
+        Returns:
+            value (dict of list): returns [levels in order] for `levels` number of levels
+        """
+        if levels <= 0:
+            return (
+                PriceLevelRO(
+                    self._buy_levels[-1],
+                    self._buys[self._buy_levels[-1]].volume,
+                    len(self._buys[self._buy_levels[-1]]),
+                    self._buys[self._buy_levels[-1]]._orders,
+                )
+                if len(self._buy_levels) > 0
+                else PriceLevelRO(0, 0, 0)
+            )
+        return [
+            PriceLevelRO(
+                self._buy_levels[-i - 1],
+                self._buys[self._buy_levels[-i - 1]].volume,
+                len(self._buys[self._buy_levels[-i - 1]]),
+                self._buys[self._buy_levels[-i - 1]]._orders,
+            )
+            if len(self._buy_levels) > i
+            else None
+            for i in range(levels)
+        ]
+
+    def asks(
+        self, levels: int = 0
+    ) -> Union[PriceLevelRO, List[Optional[PriceLevelRO]]]:
+        """return ask levels starting at top
+
+        Args:
+            levels (int): number of levels to return
+        Returns:
+            value (dict of list): returns [levels in order] for `levels` number of levels
+        """
+        if levels <= 0:
+            return (
+                PriceLevelRO(
+                    self._sell_levels[0],
+                    self._sells[self._sell_levels[0]].volume,
+                    len(self._sells[self._sell_levels[0]]),
+                    self._sells[self._sell_levels[0]]._orders,
+                )
+                if len(self._sell_levels) > 0
+                else PriceLevelRO(float("inf"), 0, 0)
+            )
+        return [
+            PriceLevelRO(
+                self._sell_levels[i],
+                self._sells[self._sell_levels[i]].volume,
+                len(self._sells[self._sell_levels[i]]),
+                self._sells[self._sell_levels[i]]._orders,
+            )
+            if len(self._sell_levels) > i
+            else None
+            for i in range(levels)
+        ]
+    
+    def levels():
         pass
 
-    def asks():
+    def cancel():
         pass
+
+    def _clearOrders():
+        pass
+
+    def _getTop():
+        pass
+
+    
 
 
         
