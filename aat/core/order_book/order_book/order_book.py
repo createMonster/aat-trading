@@ -247,8 +247,47 @@ class OrderBook(OrderBookBase):
             for i in range(levels)
         ]
     
-    def levels():
-        pass
+    def levels(self, levels: int = 0) -> Dict[Side, List[PriceLevelRO]]:
+        """return book levels starting at top
+
+        Args:
+            levels (int): number of levels to return
+        Returns:
+            value (dict of list): returns {"ask": [levels in order], "bid": [levels in order]} for `levels` number of levels
+        """
+        if levels <= 0:
+            return self.topOfBook()
+        
+        ret: Dict[Side, List[PriceLevelRO]] = {}
+        ret[Side.BUY] = []
+        ret[Side.SELL] = []
+        for _ in range(levels):
+            ask, bid = self.level(_)
+            if ask:
+                ret[Side.SELL].append(ask)
+            if bid:
+                ret[Side.BUY].append(bid)
+
+        return ret
+
+    def change(self, order: Order) -> None:
+        """modify an order on the order book, potentially triggering events:
+            EventType.CHANGE: the change event for this
+        Args:
+            order (Data): order to submit to orderbook
+        """
+        assert order.volume > 0.0
+        
+        price = order.price
+        side = order.side
+        levels = self._buy_levels if side == Side.BUY else self._sell_levels
+        prices = self._buys if side == Side.BUY else self._sells
+
+        if price not in levels:
+            raise Exception("Orderbook out of sync")
+        
+        # modify order in price level
+        prices[price].modify(order)
 
     def cancel():
         pass
@@ -259,7 +298,7 @@ class OrderBook(OrderBookBase):
     def _getTop():
         pass
 
-    
+
 
 
         
