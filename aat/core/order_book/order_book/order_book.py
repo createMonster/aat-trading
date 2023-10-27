@@ -289,14 +289,225 @@ class OrderBook(OrderBookBase):
         # modify order in price level
         prices[price].modify(order)
 
-    def cancel():
-        pass
+    def cancel(self, order: Order) -> None:
+        """remove an order from the order book, potentially triggering events:
+            EventType.CANCEL: the cancel event for this
+        Args:
+            order (Data): order to submit to orderbook
+        """
+        price = order.price
+        side = order.side
+        levels = self._buy_levels if side == Side.BUY else self._sell_levels
+        prices = self._buys if side == Side.BUY else self._sells
 
-    def _clearOrders():
-        pass
+        if price not in levels:
+            return
+        
+        # remove order from price level
+        prices[price].remove(order)
 
-    def _getTop():
-        pass
+        # delete level if no more volume
+        if not prices[price]:
+            levels.remove(price)
+
+    def _clearOrders(self, order: Order, amount: int) -> None:
+        """Internal"""
+        if order.side == Side.BUY:
+            self._sell_levels = self._sell_levels[amount:]
+        else:
+            self._buy_levels = (
+                self._buy_levels[:-amount] if amount else self._buy_levels
+            )
+
+    def _getTop(self, side: Side, cleared: int) -> Optional[float]:
+        """
+        Internal
+        Get the top price on the opposite side of the book
+        """
+        if side == Side.BUY:
+            return self._sell_levels[cleared] if len(self._sell_levels) > cleared else None
+        else:
+            return self._buy_levels[-1 - cleared] if len(self._buy_levels) > cleared else None
+        
+    def add(self, order: Order) -> None:
+        """add a new order to the order book, potentially triggering events:
+            EventType.TRADE: if this order crosses the book and fills orders
+            EventType.FILL: if this order crosses the book and fills orders
+            EventType.CHANGE: if this order crosses the book and partially fills orders
+        Args:
+            order (Data): order to submit to orderbook
+        """
+        if order is None:
+            raise Exception("Order cannot be None")
+        
+        # secondary triggered orders
+        secondaries: List[Order] = []
+
+        # get the top price on the opposite side of book
+        top = self._getTop(order.Side, self._collector.clearedLevels())
+
+        # set levels to the right side
+        levels = self._buy_levels if order.side == Side.BUY else self._sell_levels
+        prices = self._buys if order.side == Side.BUY else self._sells
+        prices_cross = self._sells if order.side == Side.BUY else self._buys
+
+        # set order price appropriately
+        if order.order_type == OrderType.MARKET:
+            if order.flag in (None, OrderFlag.NONE):
+                # price goes infinite "fill however you want"
+                order_price = float("inf") if order.side == Side.BUY else float("-inf")
+            else:
+                # with a flag, the price dicdates the "max allowed price" to AON or FOK under
+                order_price = order.price
+
+        # check if crosses
+        while top and (
+            order_price >= top if order.side == Side.BUY else order_price <= top
+        ):
+            # execute order against level
+            # if returns trade, it clears the level
+            # else, order was fully executed
+            trade, new_secondaries = prices_cross[top].cross(order)
+
+            if new_secondaries:
+                # append to secondaries
+                secondaries.extend(new_secondaries)
+                
+            if trade:
+                # clear sell level
+                top = self._getTop(
+                    order.side, self._collector.clearLevel(prices_cross[top])
+                )
+                continue
+
+            # trade is done, check if level was cleared exactly
+            if not prices_cross[top]:
+                # level cleared exactly
+                self._collector.clearLevel(prices_cross[top])
+
+            break
+
+        # if order remaining, check rules/push to book
+        if order.filled < order.volume:
+            # TODO
+            if order.order_type == OrderType.MARKET:
+                # Market orders
+                pass
+        else:
+            if order.filled > order.volume:
+                raise Exception("Unknown error occurred - orderbook is corrupt")
+            
+            # don't need to add trade as this is done in the price_levels
+            # clear levels
+            self._clearOrders(order, self._collector.clearedLevels())
+
+            # execute all the orders
+            self._collector.commit()
+
+            # execute secondaries
+            for secondary in secondaries:
+                secondary.timestamp = order.timestamp
+                self.add(secondary)
+
+        
+        # clear the collector
+        self._collector.clear()
+
+    
+    def __iter__(self) -> Iterator[Order]:
+        """iterate through asks then bids by level"""
+        for level in self._sell_levels:
+            for order in self._sells[level]:
+                yield order
+
+        for level in self._buy_levels:
+            for order in self._buys[level]:
+                yield order
+
+    def __repr__(self) -> str:
+        # show top 5 levels, then group next 5, 10, 20, etc
+        # sells first
+        sells: List[Union[_PriceLevel, List[_PriceLevel]]] = []
+        count = 5
+        orig = 5
+        for i, level in enumerate(self._sell_levels):
+            if i < 5:
+                # append to list
+                sells.append(self._sells[level])
+            else:
+                if count == orig:
+                    sells.append([])
+                elif count == 0:
+                    # double orig and restart
+                    orig = orig * 2
+                    count = orig
+                # append to last list
+                if self._sells[level]:
+                    cast(List[_PriceLevel], sells[-1]).append(self._sells[level])
+                    count -= 1
+
+        # reverse so visually upside down
+        sells.reverse()
+
+        # show top 5 levels, then group next 5, 10, 20, etc
+        # buys second
+        buys: List[Union[_PriceLevel, List[_PriceLevel]]] = []
+        count = 5
+        orig = 5
+        for i, level in enumerate(reversed(self._buy_levels)):
+            if i < 5:
+                # append to list
+                buys.append(self._buys[level])
+            else:
+                if count == orig:
+                    buys.append([])
+                if count == 0:
+                    # double orig and restart
+                    orig = orig * 2
+                    count = orig
+                # append to last list
+                if self._buys[level]:
+                    cast(List[_PriceLevel], buys[-1]).append(self._buys[level])
+                    count -= 1
+
+        # sell list, then line, then buy list
+        # if you hit a list, give aggregate
+        ret = ""
+
+        # format the sells on top, tabbed to the right, with price\tvolume
+        for item in sells:
+            if isinstance(item, list):
+                # just aggregate these upper levels
+                if len(item) > 1:
+                    ret += f"\t\t{item[0].price:.2f} - {item[-1].price:.2f}\t{sum(i.volume for i in item):.2f}"
+                else:
+                    ret += f"\t\t{item[0].price:.2f}\t\t{item[0].volume:.2f}"
+            else:
+                ret += f"\t\t{item.price:.2f}\t\t{item.volume:.2f}"
+            ret += "\n"
+
+        ret += "-----------------------------------------------------\n"
+
+        # format the buys on bottom, tabbed to the left, with volume\tprice so prices align
+        for item in buys:
+            if isinstance(item, list):
+                # just aggregate these lower levels
+                if len(item) > 1:
+                    ret += f"{sum(i.volume for i in item):.2f}\t\t{item[0].price:.2f} - {item[-1].price:.2f}\t"
+                else:
+                    ret += f"{item[0].volume:.2f}\t\t{item[0].price:.2f}"
+            else:
+                ret += f"{item.volume:.2f}\t\t{item.price:.2f}"
+            ret += "\n"
+
+        return ret
+
+            
+        
+
+            
+            
+            
 
 
 
