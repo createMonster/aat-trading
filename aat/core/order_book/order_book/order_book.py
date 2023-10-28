@@ -392,7 +392,117 @@ class OrderBook(OrderBookBase):
             # TODO
             if order.order_type == OrderType.MARKET:
                 # Market orders
-                pass
+                if order.flag in (OrderFlag.ALL_OR_NONE, OrderFlag.FILL_OR_KILL):
+                    # cancel the order, do not execute any
+                    self._collector.revert()
+
+                    # cancel the order
+                    self._collector.pushCancel(order)
+                    self._collector.commit()
+                else:
+                    # market order, partial
+                    if order.filled > 0:
+                        self._collector.pushTrade(order, order.filled)
+
+                    # clear levels
+                    self._clearOrders(order, self._collector.clearedLevels())
+                    
+                    # execute order, cancel the rest
+                    self._collector.pushCancel(order)
+                    self._collector.commit()
+
+                    # execute secondaries
+                    for secondary in secondaries:
+                        secondary.timestamp = order.timestamp
+                        self.add(secondary)
+
+            else:
+                # Limit orders
+                if order.flag == OrderFlag.FILL_OR_KILL:
+                    if order.filled > 0:
+                        # reverse partial
+                        # cancel the order, do not execute any
+                        self._collector.revert()
+
+                        # reset filled
+                        order.filled = 0.0
+                        
+                        # cancel the order
+                        self._collector.pushCancel(order)
+                        self._collector.commit()
+
+                    else:
+                        # add to book
+                        self._collector.commit()
+
+                        # limit order, put on book
+                        if _insort(levels, order.price):
+                            # new price level
+                            prices[order.price] = _PriceLevel(
+                                order.price, collector=self._collector
+                            )
+
+                        # add order to price level
+                        prices[order.price].add(order)
+
+                        # execute secondaries
+                        for secondary in secondaries:
+                            secondary.timestamp = order.timestamp
+                            self.add(secondary)
+
+                elif order.flag == OrderFlag.ALL_OR_NONE:
+                    if order.filled > 0:
+                        # reverse partial
+                        # cancel the order, do not execute any
+                        self._collector.revert()
+
+                        # reset filled
+                        order.filled = 0.0
+                        
+                        # cancel the order
+                        self._collector.pushCancel(order)
+                        self._collector.commit()
+
+                    else:
+                        # add to book
+                        self._collector.commit()
+
+                        # limit order, put on book
+                        if _insort(levels, order.price):
+                            # new price level
+                            prices[order.price] = _PriceLevel(
+                                order.price, collector=self._collector
+                            )
+
+                        # add order to price level
+                        prices[order.price].add(order)
+
+                        # execute secondaries
+                        for secondary in secondaries:
+                            secondary.timestamp = order.timestamp
+                            self.add(secondary)
+
+                else:
+                    # clear levels
+                    self._clearOrders(order, self._collector.clearedLevels())
+                    
+                    # execute order
+                    self._collector.commit()
+                    
+                    # limit order, put on books
+                    if _insort(levels, order.price):
+                            # new price level
+                            prices[order.price] = _PriceLevel(
+                                order.price, collector=self._collector
+                            )
+
+                    # add order to price level
+                    prices[order.price].add(order)
+
+                    # execute secondaries
+                    for secondary in secondaries:
+                        secondary.timestamp = order.timestamp
+                        self.add(secondary)
         else:
             if order.filled > order.volume:
                 raise Exception("Unknown error occurred - orderbook is corrupt")
