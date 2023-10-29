@@ -108,16 +108,72 @@ class _PriceLevel(object):
             order(Order or None): the order crossing, if there is some remaining
             secondary orders (List[Order] or None): orders get triggered as a result of crossing (e.g. stop orders)
         """
-        pass
+        if take_order.order_type == OrderType.STOP:
+            self.add(take_order)
+            return None, []
+        
+        if take_order.filled == take_order.volume:
+            # already filled
+            return None, self._get_stop_orders()
+        
+        elif take_order.filled > take_order.volume:
+            raise Exception("Unknown error occurred - order book is corrupt")
+        
+        while (take_order.filled < take_order.volume) and self._orders:
+            # need to fill original volume - filled so far
+            to_fill = take_order.volume - take_order.filled
+            
+            # pop maker order from list
+            maker_order = self._orders.popleft()
 
-    def clear():
+            # add to staged in case we need to revert
+            self._orders_staged.append(maker_order)
+
+            # remaining in maker order
+            maker_remaining = maker_order.volume - maker_order.filled
+
+            if maker_remaining > to_fill:
+                # handle fill or kill / all or nothing
+                if maker_order.flag in (OrderFlag.FILL_OR_KILL, OrderFlag.ALL_OR_NONE):
+                    # kill the maker order and continue
+                    self._collector.pushCancel(maker_order)
+
+                    # won't fill anything from that order
+                    self._orders_filled_staged.append(0.0)
+                    continue
+                else:
+                    # maker order is partially executed
+                    maker_order.filled += to_fill
+                    
+                    # will exit loop
+                    take_order.filled = take_order.volume
+                    self._collector.pushFill(take_order)
+
+                    # change event
+                    self._collector.pushChange(maker_order, True, to_fill)
+
+                    if maker_order.flag == OrderFlag.IMMEDIATE_OR_CANCEL:
+                        # cancel maker event, don't put in queue
+                        self._collector.pushCancel(maker_order)
+                    else:
+                        # push back in deque
+                        self._orders.appendleft(maker_order)
+
+            elif maker_remaining < to_fill:
+                pass
+            else:
+                pass
+
+    def clear(self) -> None:
+        """clear queues"""
         pass
 
     def _get_stop_orders():
         pass
 
-    def commit():
-        pass
+    def commit(self) -> None:
+        """staged orders accepted, clear"""
+        self.clear()
 
     def revert():
         pass
