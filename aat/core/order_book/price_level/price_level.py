@@ -100,28 +100,28 @@ class _PriceLevel(object):
 
         return order
 
-    def cross(self, take_order: Order) -> Tuple[Optional[Order], List[Order]]:
+    def cross(self, taker_order: Order) -> Tuple[Optional[Order], List[Order]]:
         """
         Args:
-            take_order(Order): The order that cross the spreads
+            taker_order(Order): The order that cross the spreads
         Returns:
             order(Order or None): the order crossing, if there is some remaining
             secondary orders (List[Order] or None): orders get triggered as a result of crossing (e.g. stop orders)
         """
-        if take_order.order_type == OrderType.STOP:
-            self.add(take_order)
+        if taker_order.order_type == OrderType.STOP:
+            self.add(taker_order)
             return None, []
         
-        if take_order.filled == take_order.volume:
+        if taker_order.filled == taker_order.volume:
             # already filled
             return None, self._get_stop_orders()
         
-        elif take_order.filled > take_order.volume:
+        elif taker_order.filled > taker_order.volume:
             raise Exception("Unknown error occurred - order book is corrupt")
         
-        while (take_order.filled < take_order.volume) and self._orders:
+        while (taker_order.filled < taker_order.volume) and self._orders:
             # need to fill original volume - filled so far
-            to_fill = take_order.volume - take_order.filled
+            to_fill = taker_order.volume - taker_order.filled
             
             # pop maker order from list
             maker_order = self._orders.popleft()
@@ -146,8 +146,8 @@ class _PriceLevel(object):
                     maker_order.filled += to_fill
                     
                     # will exit loop
-                    take_order.filled = take_order.volume
-                    self._collector.pushFill(take_order)
+                    taker_order.filled = taker_order.volume
+                    self._collector.pushFill(taker_order)
 
                     # change event
                     self._collector.pushChange(maker_order, True, to_fill)
@@ -160,39 +160,110 @@ class _PriceLevel(object):
                         self._orders.appendleft(maker_order)
 
             elif maker_remaining < to_fill:
-                pass
+                # partially fill it regardless
+                # this will either trigger the revert in orderbook
+                # or it will be partially executed
+                taker_order.filled += maker_remaining
+                
+                if taker_order.flag == OrderFlag.ALL_OR_NONE:
+                    # taker order can't be filled, push maker back and cancel taker
+                    # push back in deque
+                    self._orders.appendleft(maker_order)
+                    return None, self._get_stop_orders()
+                
+                else:
+                    # maker_order is fully executed
+                    maker_order.filled = maker_order.volume
+
+                    # append filled in case need to revert
+                    self._orders_filled_staged.append(maker_order.volume)
+
+                    # don't append to deque
+                    # tell maker order filled
+                    self._collector.pushChange(taker_order)
+                    self._collector.pushFill(maker_order, True, maker_remaining)
             else:
-                pass
+                # exact equal
+                maker_order.filled += to_fill
+                taker_order.filled += maker_remaining
+
+                # append filled in case need to revert
+                self._orders_filled_staged.append(to_fill)
+
+                self._collector.pushChange(taker_order)
+                self._collector.pushFill(maker_order, True, maker_remaining)
+
+        if taker_order.filled == taker_order.volume:
+            # execute the taker order
+            self._collector.pushTrade(taker_order, taker_order.filled)
+
+        elif taker_order.filled > taker_order.volume:
+            raise Exception("Unknow error occurred - orderbook is corrupt")
+        
+        # return order, this level is cleared and the order still has volume
+        return taker_order, self._get_stop_orders()
+
 
     def clear(self) -> None:
         """clear queues"""
-        pass
+        self._orders.clear()
+        self._orders_staged.clear()
+        self._orders_filled_staged.clear()
+        self._stop_orders = []
+        self._stop_orders_staged = []
 
-    def _get_stop_orders():
-        pass
+    def _get_stop_orders(self) -> List[Order]:
+        if self._stop_orders:
+            self._stop_orders_staged = self._stop_orders.copy()
+            self._stop_orders = []
+            return self._stop_orders_staged
+        
+        return []
 
     def commit(self) -> None:
         """staged orders accepted, clear"""
         self.clear()
 
-    def revert():
-        pass
+    def revert(self) -> None:
+        """staged order reverted, unstage the order"""
+        assert len(self._orders) == 0
+        
+        # reset orders
+        self._orders = self._orders_staged
+        
+        # deduct filled amount
+        for i, filled in enumerate(self._orders_filled_staged):
+            self._orders[i].filled -= filled
 
-    def __bool__(self):
-        pass
+        # reset staged
+        self._orders_staged = deque()
+        self._orders_filled_staged = deque()
 
-    def __iter__(self):
-        pass
+        # reset stop orders
+        self._stop_orders = self._stop_orders_staged
 
-    def __len__(self):
-        pass
+        # reset staged
+        self._stop_orders_staged = []
 
-    def __getitem__(self):
-        pass
+    def __bool__(self) -> bool:
+        """use deque size as truth value"""
+        return len(self._orders) > 0
 
-    def ro():
-        pass
+    def __iter__(self) -> Iterator[Order]:
+        """iterate through orders"""
+        for order in self._orders:
+            yield order
 
-    def toDict():
-        pass
-    
+    def __len__(self) -> int:
+        """get number of orders"""
+        return len(self._orders)
+
+    def __getitem__(self, index: int) -> Order:
+        """get item"""
+        return self._orders[index]
+
+    def ro(self) -> PriceLevelRO:
+        return PriceLevelRO[self.price, self.volume, len(self)]
+
+    def toDict(self) -> Dict[str, Union[int, float]]:
+        raise NotImplementedError()
