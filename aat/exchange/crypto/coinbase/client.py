@@ -104,8 +104,114 @@ class CoinbaseExchangeClient(AuthBase):
     
     def _products(self) -> dict:
         """fetch list of products from coinbase rest api"""
-        return requests.get(f"{self.api_url}/products").json()
+        return requests.get(f"{self.api_url}/products", auth=self).json()
     
     def _accounts(self) -> dict:
         """fetch a list of accounts from coinbase rest api"""
-        return requests.get(f"{self.api_url}/accounts").json()
+        return requests.get(f"{self.api_url}/accounts", auth=self).json()
+
+    def _account(self, account_id: str) -> dict:
+        """fetch single account info from coinbase rest api"""
+        return requests.get(
+            f"{self.api_url}/accounts/{account_id}", auth=self
+        ).json()
+    
+    def _newOrder(self, order_json: dict) -> str:
+        """create a new order"""
+
+        # post my order to the rest endpoint
+        res = requests.post(
+            f"{self.api_url}/orders", json=order_json, auth=self
+        )
+
+        # if successful, return the new order id
+        if res.status_code == 200:
+            # TODO what if filled immediately?
+            return res.json()["id"]
+
+        # TODO    
+        return ""
+    
+    def _orderBook(self, id: str) -> dict:
+        # fetch an instrument's level 3 orderbook from rest api
+        return requests.get(
+            f"{self.api_url}/products/{id}/book?level=3", auth=self
+        ).json()
+    
+    @lru_cache(None)
+    def instruments(self) -> List[Instrument]:
+        """construct a list of instruments from the coinbase-returned json list of instruments"""
+        ret = []
+        
+        # this will fetch a list of pairs
+        products = self._products()
+        
+        for product in products:
+            # separate pair into base and quote
+            first = product["base_currency"]
+            second = product["quote_currency"]
+
+            # for each pair, construct both underlying currencies as well as
+            # the pair object
+            ret.append(
+                Instrument(
+                    name="{}-{}".format(first, second),
+                    type=InstrumentType.PAIR,
+                    exchange=self.exchange,
+                    broker_id=product["id"],
+                    leg1=self.currency(first),
+                    leg2=self.currency(second),
+                    leg1_side=Side.BUY,
+                    leg2_side=Side.SELL,
+                    price_increment=float(product["base_increment"]),
+                )
+            )
+
+        return ret
+    
+    @lru_cache(None)
+    def currency(self, symbol: str) -> Instrument:
+        # construct a base currency from the symbol
+        return Instrument(name=symbol, type=InstrumentType.CURRENCY)
+    
+    @lru_cache(None)
+    async def accounts(self) -> List[Position]:
+        """fetch a list of coinbase accounts. These store quantities of InstrumentType.CURRENCY"""
+        ret = []
+        
+        # fetch all accounts
+        accounts = self._accounts()
+
+        # if unauthorized or invalid api key, raise
+        if accounts == {"message": "Unauthorized."} or \
+            accounts == {"message": "Invalid API Key"}:
+            raise Exception("Coinbase Auth Failed")
+        
+        # for each account
+        for account in accounts:
+            # grab the id to lookup info
+            acc_data = self._account(account["id"])
+
+            # if tradeable and positive balance
+            if acc_data["trading_enabled"] and float(acc_data["balance"]) > 0:
+                # construct a position representing the balance
+                
+                pos = Position(
+                    float(acc_data["balance"]) * self._multiple,
+                    0.0,
+                    datetime.now(),
+                    Instrument(
+                        acc_data["currency"],
+                        InstrumentType.CURRENCY,
+                        exchange=self.exchange,
+                    ),
+                    self.exchange,
+                    []
+                )
+                ret.append(pos)
+
+        return ret
+
+    async def newOrder(self, order: Order) -> bool:
+        """given an aat order, construct a coinbase order json"""
+        pass
