@@ -132,6 +132,22 @@ class CoinbaseExchangeClient(AuthBase):
         # TODO    
         return ""
     
+    def _cancelOrder(self, order_jsn: dict) -> bool:
+        """delete an existing order"""
+        # delete order with given order id
+        resp = requests.delete(
+            "{}/{}/{}?product_id={}".format(
+                self.api_url, "orders", order_jsn["id"], order_jsn["product_id"]
+            ),
+            auth=self
+        )
+
+        # if successfully deleted, return True
+        if resp.status_code == 200:
+            return True
+        # otherwise return false
+        return False
+    
     def _orderBook(self, id: str) -> dict:
         # fetch an instrument's level 3 orderbook from rest api
         return requests.get(
@@ -214,4 +230,72 @@ class CoinbaseExchangeClient(AuthBase):
 
     async def newOrder(self, order: Order) -> bool:
         """given an aat order, construct a coinbase order json"""
+        jsn: Dict[str, Union[str, int, float]] = {}
+        jsn["product_id"] = order.instrument.name
+
+        if order.order_type == OrderType.LIMIT:
+            jsn["type"] = "limit"
+            jsn["side"] = order.side.value.lower()
+            jsn["price"] = order.price
+            jsn["size"] = round(order.volume / self._multiple, 8)
+
+            # From the coinbase docs
+            if order.flag == OrderFlag.FILL_OR_KILL:
+                jsn["time_in_force"] = "FOK"
+            elif order.flag == OrderFlag.IMMEDIATE_OR_CANCEL:
+                jsn["time_in_force"] = "IOC"
+            else:
+                jsn["time_in_force"] = "GTC"
+
+        elif order.order_type == OrderType.MARKET:
+            jsn["type"] = "market"
+            jsn["side"] = order.side.value.lower()
+            jsn["size"] = round(order.volume / self._multiple, 8)
+
+        else:
+            stop_order: Order = order.stop_target
+            jsn["side"] = stop_order.side.value.lower()
+            jsn["price"] = stop_order.price
+            jsn["size"] = round(stop_order.volume / self._multiple, 8)
+
+            if stop_order.side == Side.BUY:
+                jsn["stop"] = "entry"
+            else:
+                jsn["stop"] = "loss"
+
+            jsn["stop_price"] = order.price
+
+            if stop_order.order_type == OrderType.LIMIT:
+                jsn["type"] = "limit"
+                if order.flag == OrderFlag.FILL_OR_KILL:
+                    jsn["time_in_force"] = "FOK"
+                elif order.flag == OrderFlag.IMMEDIATE_OR_CANCEL:
+                    jsn["time_in_force"] = "IOC"
+                else:
+                    jsn["time_in_force"] = "GTC"
+
+            elif stop_order.order_type == OrderType.MARKET:
+                jsn["type"] = "market"
+
+        # submit the order json
+        id = self._newOrder(jsn)
+        if id != "":
+            # successful
+            order.id = str(id)
+            self._order_map[order.id] = order
+            return True
+        
+        return False
+
+    async def cancelOrder(self, order: Order) -> bool:
+        # given an aat order, convert to json and cancel
+        jsn = {}
+        
+        jsn["id"] = order.id
+        jsn["product_id"] = cast(str. order.instrument.brokerId)
+        return self._cancelOrder(jsn)
+    
+    async def orderBook(self, subscriptions: List[Instrument]
+                        ) -> AsyncGenerator[Any, Event]:
+        """fetch level 3 order book for each Instrument in our subscriptions"""
         pass
