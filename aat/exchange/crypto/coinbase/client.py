@@ -298,4 +298,93 @@ class CoinbaseExchangeClient(AuthBase):
     async def orderBook(self, subscriptions: List[Instrument]
                         ) -> AsyncGenerator[Any, Event]:
         """fetch level 3 order book for each Instrument in our subscriptions"""
-        pass
+        for sub in subscriptions:
+            # fetch the orderbook
+            # order book is of form:
+            #       {'bids': [[price, volume, id]],
+            #        'asks': [[price, volume, id]],
+            #        'sequence': <some positive integer>}
+            ob = self._orderBook(cast(str, sub.brokerId))
+            
+            # set the last sequence number for when we connect to websocket later
+            self.seqnum[sub] = ob["sequence"]
+
+            # generate an open limit order for each bid
+            for bid, qty, id in ob["bids"]:
+                o = Order(
+                    float(qty) * self._multiple,
+                    float(bid),
+                    Side.BUY,
+                    sub,
+                    self.exchange,
+                    order_type=OrderType.LIMIT
+                )
+                yield Event(type=EventType.OPEN, target=o)
+
+            # generate an open limit order for each ask
+            for ask, qty, id in ob["asks"]:
+                o = Order(
+                    float(qty) * self._multiple,
+                    float(ask),
+                    Side.BUY,
+                    sub,
+                    self.exchange,
+                    order_type=OrderType.LIMIT
+                )
+                yield Event(type=EventType.OPEN, target=o)
+
+    async def websocket_l3(self, subscriptions: List[Instrument]):
+        # copy the base subscription template
+        subscription = _SUBSCRIPTION.copy()
+        
+        # fill in l3 details
+        cast(List, subscription["channels"]).append("full")
+
+        # for each subscription, add symbol to product_uds
+        for sub in subscriptions:
+            cast(List, subscription["product_ids"]).append(sub.brokerId)
+
+        # sign the message in a similar way to the rest api, but
+        # using the message of GET/users/self/verify
+        timestamp = str(time.time())
+        message = timestamp + "GET/users/self/verify"
+        hmac_key = base64.b64decode(self.secret_key)
+        signature = hmac.new(hmac_key, message.encode(), hashlib.sha256)
+        signature_b64 = base64.b64encode(signature.digest()).decode()
+
+        subscription.update(
+            {
+                "signature": signature_b64,
+                "timestamp": timestamp,
+                "key": self.api_key,
+                "passphrase": self.passphrase,
+            }
+        )
+
+        # construct a new websocket session
+        session = aiohttp.ClientSession()
+        
+        # connect to the websocket
+        async with session.ws_connect(self.ws_url) as ws:
+            # send the subscription
+            await ws.send_str(json.dumps(subscription))
+
+            # for each message returned
+            async for msg in ws:
+                # only handle text message
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    # load the data as json
+                    x = json.loads(msg.data)
+
+                    # skip earlier messages that our orderbook already reflects
+                    if "sequence" in x:
+                        inst = Instrument(
+                            x["product_id"], InstrumentType.PAIR, self.exchange
+                        )
+                        if x.get("sequence", float("inf")) < self.seqnum.get(inst, 0):
+                            # if msg has a sequence number, and that number is < the last sequence number
+                            # ignore
+                            continue
+
+                    if x["type"] in ("subscriptions", "heartbeat"):
+                        pass
