@@ -387,4 +387,40 @@ class CoinbaseExchangeClient(AuthBase):
                             continue
 
                     if x["type"] in ("subscriptions", "heartbeat"):
-                        pass
+                        # TODO yield heartbeats?
+                        continue
+
+                    elif x["type"] == "received":
+                        o = self._process_received(x)
+
+                        if o:
+                            # yield an open event for the new order
+                            e = Event(type=EventType.OPEN, target=o)
+                            yield e
+
+                        elif x["type"] == "done":
+                            pass
+                        
+                        elif x["type"] == "match":
+                            pass
+                        elif x["type"] == "open":
+                            pass
+                        elif x["type"] == "change":
+                            pass
+                        elif x["type"] == "error":
+                            pass
+                        else:
+                            # TODO unhandled
+                            print ("TODO: unhandled")
+
+        async def websocket_l2(self, subscription: List[Instrument]): 
+            pass
+
+        async def websocket_trades(self, subscription: List[Instrument]):
+            pass
+
+        def _process_ticker(self, x: Dict[str, Union[str, int, float]]) -> Trade:
+            pass
+
+        def _process_snapshot(self) -> None:
+            pass
