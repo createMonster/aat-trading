@@ -399,28 +399,258 @@ class CoinbaseExchangeClient(AuthBase):
                             yield e
 
                         elif x["type"] == "done":
-                            pass
+                            o = cast(Order, self._process_done(x))
+                            if o:
+                                e = Event(type=EventType.CANCEL, target=o)
+                                yield o
                         
                         elif x["type"] == "match":
-                            pass
+                            o = cast(Order, self._process_match(x))
+                            if o:
+                                e = Event(type=EventType.TRADE, target=o)
+                                yield o
+                        
                         elif x["type"] == "open":
-                            pass
+                            o = cast(Order, self._process_open(x))
+                            if o:
+                                e = Event(type=EventType.OPEN, target=o)
+                                yield o
+                        
                         elif x["type"] == "change":
-                            pass
+                            o = cast(Order, self._process_change(x))
+                            if o:
+                                e = Event(type=EventType.CHANGE, target=o)
+                                yield o
+                        
                         elif x["type"] == "error":
                             pass
                         else:
                             # TODO unhandled
                             print ("TODO: unhandled")
 
-        async def websocket_l2(self, subscription: List[Instrument]): 
-            pass
+    async def websocket_l2(self, subscriptions: List[Instrument]): 
+        # copy the base subscription template
+        subscription = _SUBSCRIPTION.copy()
+        
+        # fill in l2 details
+        cast(List, subscription["channels"]).append("level2")
 
-        async def websocket_trades(self, subscription: List[Instrument]):
-            pass
+        # get trades
+        cast(List, subscription["channels"]).append("ticker")
 
-        def _process_ticker(self, x: Dict[str, Union[str, int, float]]) -> Trade:
-            pass
+        # for each subcription, add symbol to product_ids
+        for sub in subscriptions:
+            cast(List, subscription["product_ids"]).append(sub.brokerId)
 
-        def _process_snapshot(self) -> None:
-            pass
+        # sign the message in a similar way to the rest api, but
+        # using the message of GET/users/self/verify
+        timestamp = str(time.time())
+        message = timestamp + "GET/users/self/verify"
+        hmac_key = base64.b64decode(self.secret_key)
+        signature = hmac.new(hmac_key, message.encode(), hashlib.sha256)
+        signature_b64 = base64.b64encode(signature.digest()).decode()
+
+        # update the subscription message with the signing info
+        subscription.update(
+            {
+                "signature": signature_b64,
+                "timestamp": timestamp,
+                "key": self.api_key,
+                "passphrase": self.passphrase,
+            }
+        )
+
+        # construct a new websocket session
+        session = aiohttp.ClientSession()
+
+        # connect to the websocket
+        async with session.ws_connect(self.ws_url) as ws:
+            # send the subscription  
+            await ws.send_str(json.dumps(subscription))
+
+            # for each message returned
+            async for msg in ws:
+                # only handle text message
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    # load the data as json
+                    x = json.loads(msg.data)
+
+                    # ignore subscription  and heartbeat messages
+                    if x["type"] in ("subscriptions", "heartbeat"):
+                        # TODO yield heartbeats?
+                        continue
+
+                    elif x["type"] == "snapshot":
+                        # maintain order book internally
+                        # TODO
+                        ...
+
+                    elif x["type"] == "l2update":
+                        # maintain order book internally
+                        # TODO
+                        ...
+
+                    elif x["type"] == "ticker":
+                        # maintain order book internally
+                        # TODO
+                        t = self._process_ticker(x)
+                        e = Event(type=EventType.TRADE, target=t)
+                        yield e
+
+    async def websocket_trades(self, subscriptions: List[Instrument]):
+        # copy the base subscription template
+        subscription = _SUBSCRIPTION.copy()
+
+        # get trades
+        cast(List, subscription["channels"]).append("ticker")
+
+        # for each subcription, add symbol to product_ids
+        for sub in subscriptions:
+            cast(List, subscription["product_ids"]).append(sub.brokerId)
+
+        # sign the message in a similar way to the rest api, but
+        # using the message of GET/users/self/verify
+        timestamp = str(time.time())
+        message = timestamp + "GET/users/self/verify"
+        hmac_key = base64.b64decode(self.secret_key)
+        signature = hmac.new(hmac_key, message.encode(), hashlib.sha256)
+        signature_b64 = base64.b64encode(signature.digest()).decode()
+
+        # update the subscription message with the signing info
+        subscription.update(
+            {
+                "signature": signature_b64,
+                "timestamp": timestamp,
+                "key": self.api_key,
+                "passphrase": self.passphrase,
+            }
+        )
+
+        # construct a new websocket session
+        session = aiohttp.ClientSession()
+
+        async with session.ws_connect(self.ws_url) as ws:
+            # send the subscription
+            await ws.send_str(json.dumps(subscription))
+            
+            # for each message returned
+            async for msg in ws:
+                 # only handle text messages
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    # load the data as json
+                    x = json.loads(msg.data)
+
+                    # ignore subscription  and heartbeat messages
+                    if x["type"] in ("subscriptions", "heartbeat"):
+                        # TODO yield heartbeats?
+                        continue
+
+                    elif x["type"] == "ticker":
+                        t = self._process_ticker(x)
+                        e = Event(type=EventType.TRADE, target=t)
+                        yield e
+
+    def _process_ticker(self, x: Dict[str, Union[str, int, float]]) -> Trade:
+        o = Order(
+            float(x["last_size"]) * self._multiple,
+            float(x["price"]),
+            Side(str(x["side"]).upper()),
+            Instrument(str(x["product_id"]), InstrumentType.PAIR, self.exchange),
+            self.exchange,
+            filled=float(x["last_size"]) * self._multiple
+        )
+
+        t = Trade(
+            float(x["last_size"]) * self._multiple,
+            float(x["price"]),
+            o
+        )
+        return t
+
+    def _process_snapshot(self) -> None:
+        # TODO
+        pass
+
+    def _process_l2update(self) -> None:
+        # TODO
+        pass
+
+    def _process_open(self, x: Dict[str, Union[str, int, float]]) -> Order:
+        # The order is now open on the order book.
+        # This message will only be sent for orders
+        # which are not fully filled immediately.
+        # remaining_size will indicate how much of
+        # the order is unfilled and going on the book.
+        # {
+        #     "type": "open",
+        #     "time": "2014-11-07T08:19:27.028459Z",
+        #     "product_id": "BTC-USD",
+        #     "sequence": 10,
+        #     "order_id": "d50ec984-77a8-460a-b958-66f114b0de9b",
+        #     "price": "200.2",
+        #     "remaining_size": "1.00",
+        #     "side": "sell"
+        # }
+
+        o = Order(
+            float(x["remaining_size"]) * self._multiple,
+            float(x["price"]),
+            Side(str(x["side"]).upper()),
+            Instrument(str(x["product_id"]), InstrumentType.PAIR, self.exchange),
+            self.exchange,
+        )
+        return o
+
+    def _process_match(self, x: Dict[str, Union[str, int, float]]) -> Trade:
+        if str(x.get("taker_order_id", "")) in self._order_map:
+            o = self._order_map[str(x.get("taker_order_id"))]
+
+            o.filled = float(x["size"]) * self._multiple
+
+            # my order
+            mine = True
+
+        elif str(x.get("maker_order_id", "")) in self._order_map:
+            o = self._order_map[str(x.get("maker_order_id"))]
+            # TODO filled?
+
+            # my order
+            mine = True
+
+        else:
+            o = Order(
+                float(x["size"]) * self._multiple,
+                float(x["price"]),
+                Side(str(x["side"]).upper()),
+                Instrument(str(x["product_id"]), InstrumentType.PAIR, self.exchange),
+                self.exchange,
+                filled=float(x["size"]) * self._multiple,
+            )
+
+            # not my order
+            mine = False
+
+        # create a trader with this order as the taker
+        # makers would be accumulated via the
+        # `elif x['reason'] == 'filled'` block above
+        t = Trade(
+            float(x["size"]) * self._multiple,
+            float(x["price"]),
+            taker_order=o,
+            maker_orders=[],
+        )
+
+        if mine:
+            t.my_order = o
+
+        return t
+
+    def _process_done(self) -> Optional[Order]:
+        pass
+
+    def _process_received(self) -> Optional[Order]:
+        pass
+    
+    def _process_change(self, x) -> Optional[Order]:
+        pass
+
