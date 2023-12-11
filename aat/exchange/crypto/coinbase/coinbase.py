@@ -1,5 +1,6 @@
 import os
 from typing import List, AsyncGenerator, Any
+from aat import Instrument
 
 from aat.core import ExchangeType, Order, Instrument, Position, Event
 from aat.config import TradingType, InstrumentType
@@ -85,4 +86,53 @@ class CoinbaseProExchange(Exchange):
 
     async def connect(self) -> None:
         """connect to exchange, should be asynchronous"""
+        # instantiate instruments
         self._client.instruments()
+
+    async def lookup(self, instrument: Instrument) -> List[Instrument]:
+        """lookup an instrument on the exchange"""
+        # TODO
+        raise NotImplementedError()
+    
+
+    # ******************* #
+    # Market Data Methods #
+    # ******************* #
+    async def tick(self) -> AsyncGenerator[Any, Event]:
+        """return data from exchange"""
+        if self._order_book_level == "l3":
+            # First, roll through order book snapshot
+            async for item in self._client.orderBook(self._subscriptions):
+                yield item
+
+            # then stream in live updates
+            async for tick in self._client.websocket_l3(self._subscriptions):
+                yield tick
+
+        elif self._order_book_level == "l2":
+            async for tick in self._client.websocket_l2(self._subscriptions):
+                yield tick
+
+        elif self._order_book_level == "trades":
+            async for tick in self._client.websocket_trades(self._subscriptions):
+                yield tick
+
+    async def subscribe(self, instrument: Instrument) -> None:
+        # can only subscribe to pair data
+        if instrument.type == InstrumentType.PAIR:
+            self._subscriptions.append(instrument)
+
+    # ******************* #
+    # Order Entry Methods #
+    # ******************* #
+    async def accounts(self) -> List[Position]:
+        """get accounts from source"""
+        return await self._client.accounts()
+
+    async def newOrder(self, order: Order) -> bool:
+        """submit a new order to the exchange. should set the given order's `id` field to exchange-assigned id"""
+        return await self._client.newOrder(order)
+
+    async def cancelOrder(self, order: Order) -> bool:
+        """cancel a previously submitted order to the exchange."""
+        return await self._client.cancelOrder(order)
