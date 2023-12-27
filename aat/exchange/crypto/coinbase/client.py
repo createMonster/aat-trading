@@ -645,12 +645,184 @@ class CoinbaseExchangeClient(AuthBase):
 
         return t
 
-    def _process_done(self) -> Optional[Order]:
-        pass
+    def _process_done(self, x: Dict[str, Union[str, int, float]]) -> Optional[Order]:
+        # The order is no longer on the order book. Sent for
+        # all orders for which there was a received message.
+        # This message can result from an order being canceled
+        # or filled. There will be no more messages for this
+        # order_id after a done message. remaining_size indicates
+        # how much of the order went unfilled; this will
+        # be 0 for filled orders.
+        #
+        # market orders will not have a remaining_size or price
+        # field as they are never on the open order book at a
+        # given price.
+        #
+        # {
+        #     "type": "done",
+        #     "time": "2014-11-07T08:19:27.028459Z",
+        #     "product_id": "BTC-USD",
+        #     "sequence": 10,
+        #     "price": "200.2",
+        #     "order_id": "d50ec984-77a8-460a-b958-66f114b0de9b",
+        #     "reason": "filled", // or "canceled"
+        #     "side": "sell",
+        #     "remaining_size": "0"
+        # }
+        if x["reason"] == "canceled":
+            id = x["order_id"]
 
-    def _process_received(self) -> Optional[Order]:
-        pass
-    
-    def _process_change(self, x) -> Optional[Order]:
-        pass
+            # if cancelled
+            if "price" not in x:
+                # cancel this event if we have a full local order book
+                # where we can determine the original order
+                print("TODO: noprice")
+                return None
 
+            # FIXME don't use remaining_size, lookup original size in order book
+            o = Order(
+                float(x["remaining_size"]) * self._multiple,
+                float(x["price"]),
+                Side(str(x["side"]).upper()),
+                Instrument(
+                    str(x["product_id"]),
+                    InstrumentType.PAIR,
+                    self.exchange,
+                ),
+                self.exchange,
+                id=id,
+            )
+            return o
+
+        elif x["reason"] == "filled":
+            # Will have a match event
+            # TODO route these to full local order book
+            return None
+
+        else:
+            # TODO unhandled
+            # this should never print
+            print("TODO: unhandled", x)
+        return None
+
+    def _process_received(
+        self, x: Dict[str, Union[str, int, float]]
+    ) -> Optional[Order]:
+        # generate new Open events
+        # A valid order has been received and is now active.
+        # This message is emitted for every single valid order as
+        # soon as the matching engine receives it whether it fills
+        # immediately or not.
+        #
+        # The received message does not indicate a resting order on
+        # the order book. It simply indicates a new incoming order
+        # which as been accepted by the matching engine for processing.
+        # Received orders may cause match message to follow if they
+        # are able to begin being filled (taker behavior). Self-trade
+        # prevention may also trigger change messages to follow if the
+        # order size needs to be adjusted. Orders which are not fully
+        # filled or canceled due to self-trade prevention result in an
+        # open message and become resting orders on the order book.
+        #
+        # Market orders (indicated by the order_type field) may have
+        # an optional funds field which indicates how much quote currency
+        # will be used to buy or sell. For example, a funds field of
+        # 100.00 for the BTC-USD product would indicate a purchase of
+        # up to 100.00 USD worth of bitcoin.
+        #
+        # {
+        #     "type": "received",
+        #     "time": "2014-11-07T08:19:27.028459Z",
+        #     "product_id": "BTC-USD",
+        #     "sequence": 10,
+        #     "order_id": "d50ec984-77a8-460a-b958-66f114b0de9b",
+        #     "size": "1.34",
+        #     "price": "502.1",
+        #     "side": "buy",
+        #     "order_type": "limit"
+        # }
+        # {
+        #     "type": "received",
+        #     "time": "2014-11-09T08:19:27.028459Z",
+        #     "product_id": "BTC-USD",
+        #     "sequence": 12,
+        #     "order_id": "dddec984-77a8-460a-b958-66f114b0de9b",
+        #     "funds": "3000.234",
+        #     "side": "buy",
+        #     "order_type": "market"
+        # }
+        id = x["order_id"]
+
+        # FIXME make sure we dont need this
+        # if id in self._order_map:
+        #     # yield a received event and get order from dict
+        #     o = self._order_map[id]
+        #     yield Event(type=EventType.RECEIVED, target=o)
+
+        if x["order_type"] == "market":
+            if "size" in x and float(x["size"]) <= 0:
+                # ignore zero size orders
+                # TODO why do we even get these?
+                return None
+
+            elif "size" not in x and "funds" in x:
+                print("TODO: funds")
+                # TODO can't handle these yet, no mapping from funds to size/price
+                return None
+
+            # create a market data order from the event data
+            # TODO set something for price? float('inf') ?
+            o = Order(
+                float(x["size"]) * self._multiple,
+                0.0,
+                Side(str(x["side"]).upper()),
+                Instrument(str(x["product_id"]), InstrumentType.PAIR, self.exchange),
+                self.exchange,
+                id=id,
+            )
+
+        else:
+            # create limit order from the event data
+            o = Order(
+                float(x["size"]) * self._multiple,
+                float(x["price"]),
+                Side(str(x["side"]).upper()),
+                Instrument(str(x["product_id"]), InstrumentType.PAIR, self.exchange),
+                self.exchange,
+            )
+        return o
+
+    def _process_change(self, x: Dict[str, Union[str, int, float]]) -> Optional[Order]:
+        # An order has changed. This is the result
+        # of self-trade prevention adjusting the
+        # order size or available funds. Orders can
+        # only decrease in size or funds. change
+        # messages are sent anytime an order changes
+        # in size; this includes resting orders (open)
+        # as well as received but not yet open.
+        # change messages are also sent when a new
+        # market order goes through self trade prevention
+        # and the funds for the market order have changed.
+        # {
+        #     "type": "change",
+        #     "time": "2014-11-07T08:19:27.028459Z",
+        #     "sequence": 80,
+        #     "order_id": "ac928c66-ca53-498f-9c13-a110027a60e8",
+        #     "product_id": "BTC-USD",
+        #     "new_size": "5.23512",
+        #     "old_size": "12.234412",
+        #     "price": "400.23",
+        #     "side": "sell"
+        # }
+        # {
+        #     "type": "change",
+        #     "time": "2014-11-07T08:19:27.028459Z",
+        #     "sequence": 80,
+        #     "order_id": "ac928c66-ca53-498f-9c13-a110027a60e8",
+        #     "product_id": "BTC-USD",
+        #     "new_funds": "5.23512",
+        #     "old_funds": "12.234412",
+        #     "price": "400.23",
+        #     "side": "sell"
+        # }
+        ...
